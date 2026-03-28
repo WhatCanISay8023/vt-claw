@@ -1,0 +1,15 @@
+
+# Temp files
+.tmp-*
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Secrets
+.env
+.env_container
+.wechat_auth.json

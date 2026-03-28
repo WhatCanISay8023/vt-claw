@@ -1,0 +1,23 @@
+{
+  "name": "pi-agent-claw",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Container-side agent runner",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.60.0",
+    "cron-parser": "^5.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3",
+    "prettier": "^3.8.1"
+  }
+}

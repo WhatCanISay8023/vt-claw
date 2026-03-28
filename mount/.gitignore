@@ -1,0 +1,5 @@
+# Local data & auth
+store/
+data/
+logs/
+groups/
