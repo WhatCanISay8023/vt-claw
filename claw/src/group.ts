@@ -431,7 +431,6 @@ export async function buildGroups(runtime: ChannelRuntime): Promise<void> {
       const modelsConfig = JSON.parse(fs.readFileSync(modelFile, "utf-8"));
 
       // First pass: collect all apiKey values (env var names)
-      const envVarNames: string[] = [];
       function collectApiKeys(obj: any): void {
         if (!obj || typeof obj !== "object") return;
         if (Array.isArray(obj)) {
