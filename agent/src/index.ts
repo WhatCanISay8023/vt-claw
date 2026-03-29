@@ -14,8 +14,8 @@
  *   Final marker after loop ends signals completion.
  */
 
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 import {
   createAgentSession,
   SessionManager,
@@ -25,8 +25,8 @@ import {
   sendMessageTool,
   scheduleTaskTool,
   listTasksTool,
-  cancelTaskTool
-} from "./ipctools.js"
+  cancelTaskTool,
+} from "./ipctools.js";
 
 interface ContainerInput {
   prompt: string;
@@ -37,28 +37,30 @@ interface ContainerInput {
 }
 
 interface ContainerOutput {
-  status: 'success' | 'error';
+  status: "success" | "error";
   result: string | null;
   newSessionId?: string;
   error?: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_INPUT_DIR = "/workspace/ipc/input";
+const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, "_close");
 const IPC_POLL_MS = 500;
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", reject);
   });
 }
 
-const OUTPUT_START_MARKER = '---VT-CLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---VT-CLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = "---VT-CLAW_OUTPUT_START---";
+const OUTPUT_END_MARKER = "---VT-CLAW_OUTPUT_END---";
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -70,14 +72,16 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-
-
 /**
  * Check for _close sentinel.
  */
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {
+      /* ignore */
+    }
     return true;
   }
   return false;
@@ -90,22 +94,29 @@ function shouldClose(): boolean {
 function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith(".json"))
       .sort();
 
     const messages: string[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
+        if (data.type === "message" && data.text) {
           messages.push(data.text);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return messages;
@@ -128,7 +139,7 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(messages.join("\n"));
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -165,49 +176,59 @@ Guidelines:
  *   - If not found or no sessionId, create new persistent session
  *   - Sessions are stored in groupFolder/sessions/
  */
-async function runQuery (
+async function runQuery(
   prompt: string,
   containerInput: ContainerInput,
 ): Promise<{ newSessionId?: string; closedDuringQuery: boolean }> {
-
   const sessionId = containerInput.sessionId;
   let sessionManager;
   if (sessionId) {
     // Try to find and open existing session
     try {
       const sessions = await SessionManager.list(process.cwd());
-      const existingSession = sessions.find(s => s.id === sessionId || s.path.includes(sessionId));
+      const existingSession = sessions.find(
+        (s) => s.id === sessionId || s.path.includes(sessionId),
+      );
 
       if (existingSession) {
         log(`Resuming existing session: ${existingSession.id.slice(0, 8)}...`);
         sessionManager = SessionManager.open(existingSession.path);
       } else {
-        log(`Session ${sessionId.slice(0, 8)}... not found, creating new session`);
+        log(
+          `Session ${sessionId.slice(0, 8)}... not found, creating new session`,
+        );
         sessionManager = SessionManager.create(process.cwd());
       }
     } catch (err) {
-      log(`Error listing sessions, creating new: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        `Error listing sessions, creating new: ${err instanceof Error ? err.message : String(err)}`,
+      );
       sessionManager = SessionManager.create(process.cwd());
     }
   } else {
     // No sessionId provided, create new persistent session
-    log('Creating new persistent session');
+    log("Creating new persistent session");
     sessionManager = SessionManager.create(process.cwd());
   }
-  
-  const extTools = [sendMessageTool, scheduleTaskTool, listTasksTool, cancelTaskTool];
+
+  const extTools = [
+    sendMessageTool,
+    scheduleTaskTool,
+    listTasksTool,
+    cancelTaskTool,
+  ];
   const resLoader = new DefaultResourceLoader({
-	  systemPromptOverride: () => SYSTEM_PROMPT,
+    systemPromptOverride: () => SYSTEM_PROMPT,
   });
   await resLoader.reload();
-  
+
   const { session } = await createAgentSession({
     sessionManager: sessionManager,
     customTools: extTools,
     resourceLoader: resLoader,
   });
 
-  console.log( session.systemPrompt );
+  console.log(session.systemPrompt);
 
   session.subscribe((event) => {
     switch (event.type) {
@@ -232,7 +253,7 @@ async function runQuery (
   if (msg.role === "assistant") {
     if (msg.errorMessage) {
       writeOutput({
-        status: 'error',
+        status: "error",
         result: msg.errorMessage,
         newSessionId: newSessionId,
       });
@@ -240,7 +261,7 @@ async function runQuery (
       msg.content.forEach((m) => {
         if (m.type == "text") {
           writeOutput({
-            status: 'success',
+            status: "success",
             result: m.text,
             newSessionId: newSessionId,
           });
@@ -251,7 +272,7 @@ async function runQuery (
 
   return {
     newSessionId: session.sessionId,
-    closedDuringQuery: false
+    closedDuringQuery: false,
   };
 }
 
@@ -262,13 +283,17 @@ async function main(): Promise<void> {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
     // Delete the temp file the entrypoint wrote — it contains secrets
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
+    try {
+      fs.unlinkSync("/tmp/input.json");
+    } catch {
+      /* may not exist */
+    }
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
-      status: 'error',
+      status: "error",
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }
@@ -276,7 +301,11 @@ async function main(): Promise<void> {
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
@@ -286,15 +315,15 @@ async function main(): Promise<void> {
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    prompt += "\n" + pending.join("\n");
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   try {
     while (true) {
-      log(`Starting query (session: ${containerInput.sessionId || 'new'})...`);
+      log(`Starting query (session: ${containerInput.sessionId || "new"})...`);
 
-      const queryResult = await runQuery(prompt, containerInput); 
+      const queryResult = await runQuery(prompt, containerInput);
       if (queryResult.newSessionId) {
         containerInput.sessionId = queryResult.newSessionId;
       }
@@ -303,19 +332,23 @@ async function main(): Promise<void> {
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
       if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log("Close sentinel consumed during query, exiting");
         break;
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: containerInput.sessionId });
+      writeOutput({
+        status: "success",
+        result: null,
+        newSessionId: containerInput.sessionId,
+      });
 
-      log('Query ended, waiting for next IPC message...');
+      log("Query ended, waiting for next IPC message...");
 
       // Wait for the next message or _close sentinel
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log("Close sentinel received, exiting");
         break;
       }
 
@@ -326,10 +359,10 @@ async function main(): Promise<void> {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
     writeOutput({
-      status: 'error',
+      status: "error",
       result: null,
       newSessionId: containerInput.sessionId,
-      error: errorMessage
+      error: errorMessage,
     });
     process.exit(1);
   }

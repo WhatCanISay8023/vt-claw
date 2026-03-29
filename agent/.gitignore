@@ -4,6 +4,3 @@ node_modules/
 # Build output
 dist/
 
-package-lock.json
-
-

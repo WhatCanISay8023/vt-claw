@@ -1,12 +1,12 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "@sinclair/typebox";
-import fs from 'fs';
-import path from 'path';
-import { CronExpressionParser } from 'cron-parser';
+import fs from "fs";
+import path from "path";
+import { CronExpressionParser } from "cron-parser";
 
-const IPC_DIR = '/workspace/ipc';
-const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const IPC_DIR = "/workspace/ipc";
+const MESSAGES_DIR = path.join(IPC_DIR, "messages");
+const TASKS_DIR = path.join(IPC_DIR, "tasks");
 
 const chatJid = process.env.VTCLAW_CHAT_JID!;
 const groupFolder = process.env.VTCLAW_GROUP_FOLDER!;
@@ -26,18 +26,25 @@ function writeIpcFile(dir: string, data: object): string {
 }
 
 const sendMessageSchema = Type.Object({
-  text: Type.String({ description: "The message text to send, can't be empty." }),
-})
+  text: Type.String({
+    description: "The message text to send, can't be empty.",
+  }),
+});
 
 export const sendMessageTool: AgentTool<typeof sendMessageSchema> = {
   name: "send_message",
-  label: "Send Message to Channel",  // For UI display
-  description: "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  label: "Send Message to Channel", // For UI display
+  description:
+    "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   parameters: sendMessageSchema,
 
-  execute: async (_toolCallId: string, {text}:{ text: string;}, _signal?: AbortSignal) => {
+  execute: async (
+    _toolCallId: string,
+    { text }: { text: string },
+    _signal?: AbortSignal,
+  ) => {
     const data: Record<string, string | undefined> = {
-      type: 'message',
+      type: "message",
       chatJid,
       text: text,
       groupFolder,
@@ -45,16 +52,28 @@ export const sendMessageTool: AgentTool<typeof sendMessageSchema> = {
     };
     writeIpcFile(MESSAGES_DIR, data);
     return {
-      content: [{ type: 'text' as const, text: 'Message sent.' }],
+      content: [{ type: "text" as const, text: "Message sent." }],
       details: undefined,
     };
   },
 };
 
 const scheduleTaskSchema = Type.Object({
-  prompt: Type.String({ description: 'What the agent should do when the task runs. For isolated mode, include all necessary context here.' }),
-  schedule_type: Type.Union([Type.Literal('cron'), Type.Literal('interval'), Type.Literal('once')], { description: 'cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time' }),
-  schedule_value: Type.String({ description: 'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)' }),  
+  prompt: Type.String({
+    description:
+      "What the agent should do when the task runs. For isolated mode, include all necessary context here.",
+  }),
+  schedule_type: Type.Union(
+    [Type.Literal("cron"), Type.Literal("interval"), Type.Literal("once")],
+    {
+      description:
+        "cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time",
+    },
+  ),
+  schedule_value: Type.String({
+    description:
+      'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
+  }),
 });
 
 export const scheduleTaskTool: AgentTool<typeof scheduleTaskSchema> = {
@@ -79,31 +98,53 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 • once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   parameters: scheduleTaskSchema,
 
-  execute: async (_toolCallId: string, args: Static<typeof scheduleTaskSchema>, _signal?: AbortSignal) => {
+  execute: async (
+    _toolCallId: string,
+    args: Static<typeof scheduleTaskSchema>,
+    _signal?: AbortSignal,
+  ) => {
     // Validate schedule_value before writing IPC
-    if (args.schedule_type === 'cron') {
+    if (args.schedule_type === "cron") {
       try {
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).`,
+            },
+          ],
           isError: true,
           details: undefined,
         };
       }
-    } else if (args.schedule_type === 'interval') {
+    } else if (args.schedule_type === "interval") {
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).`,
+            },
+          ],
           isError: true,
           details: undefined,
         };
       }
-    } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+    } else if (args.schedule_type === "once") {
+      if (
+        /[Zz]$/.test(args.schedule_value) ||
+        /[+-]\d{2}:\d{2}$/.test(args.schedule_value)
+      ) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
           details: undefined,
         };
@@ -111,7 +152,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
           details: undefined,
         };
@@ -119,7 +165,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     }
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const data = {
-      type: 'schedule_task',
+      type: "schedule_task",
       taskId,
       prompt: args.prompt,
       schedule_type: args.schedule_type,
@@ -130,12 +176,16 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     };
     writeIpcFile(TASKS_DIR, data);
     return {
-      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [
+        {
+          type: "text" as const,
+          text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}`,
+        },
+      ],
       details: undefined,
     };
   },
 };
-
 
 const listTasksSchema = Type.Object({});
 
@@ -145,28 +195,59 @@ export const listTasksTool: AgentTool<typeof listTasksSchema> = {
   description: "List all scheduled tasks.",
   parameters: listTasksSchema,
 
-  execute: async (_toolCallId: string, _args: Static<typeof listTasksSchema>, _signal?: AbortSignal) => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+  execute: async (
+    _toolCallId: string,
+    _args: Static<typeof listTasksSchema>,
+    _signal?: AbortSignal,
+  ) => {
+    const tasksFile = path.join(IPC_DIR, "current_tasks.json");
     try {
       if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }], details: undefined };
+        return {
+          content: [
+            { type: "text" as const, text: "No scheduled tasks found." },
+          ],
+          details: undefined,
+        };
       }
-      const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+      const tasks = JSON.parse(fs.readFileSync(tasksFile, "utf-8"));
       if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }], details: undefined };
+        return {
+          content: [
+            { type: "text" as const, text: "No scheduled tasks found." },
+          ],
+          details: undefined,
+        };
       }
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+          (t: {
+            id: string;
+            prompt: string;
+            schedule_type: string;
+            schedule_value: string;
+            status: string;
+            next_run: string;
+          }) =>
+            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || "N/A"}`,
         )
-        .join('\n');
+        .join("\n");
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }], details: undefined };
+      return {
+        content: [
+          { type: "text" as const, text: `Scheduled tasks:\n${formatted}` },
+        ],
+        details: undefined,
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
         details: undefined,
       };
     }
@@ -174,7 +255,7 @@ export const listTasksTool: AgentTool<typeof listTasksSchema> = {
 };
 
 const cancelTaskSchema = Type.Object({
-  task_id: Type.String({ description: 'The task ID to cancel' }),
+  task_id: Type.String({ description: "The task ID to cancel" }),
 });
 
 export const cancelTaskTool: AgentTool<typeof cancelTaskSchema> = {
@@ -183,9 +264,13 @@ export const cancelTaskTool: AgentTool<typeof cancelTaskSchema> = {
   description: "Cancel and delete a scheduled task.",
   parameters: cancelTaskSchema,
 
-  execute: async (_toolCallId: string, args: Static<typeof cancelTaskSchema>, _signal?: AbortSignal) => {
+  execute: async (
+    _toolCallId: string,
+    args: Static<typeof cancelTaskSchema>,
+    _signal?: AbortSignal,
+  ) => {
     const data = {
-      type: 'cancel_task',
+      type: "cancel_task",
       taskId: args.task_id,
       groupFolder,
       timestamp: new Date().toISOString(),
@@ -194,7 +279,12 @@ export const cancelTaskTool: AgentTool<typeof cancelTaskSchema> = {
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }],
+      content: [
+        {
+          type: "text" as const,
+          text: `Task ${args.task_id} cancellation requested.`,
+        },
+      ],
       details: undefined,
     };
   },
