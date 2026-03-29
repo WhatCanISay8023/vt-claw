@@ -95,7 +95,7 @@ export class WeChatChannel implements Channel {
   private constructor(auth: WeChatAuthInfo, opts: ChannelOpts) {
     this.name = `WeChat-${auth.userId}`.slice(0, 15);
     this.jid = `wx-${auth.userId}`;
-    this.folder = "wx-" + auth.botId.split("@")[0];
+    this.folder = "wx-" + auth.userId.split("@")[0];
     this.opts = opts;
     this.auth = auth;
 
