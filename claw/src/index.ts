@@ -55,10 +55,7 @@ const runtime: ChannelRuntime = {
       "last_agent_timestamp",
       JSON.stringify(runtime.lastAgentTimestamp),
     );
-    setRouterState(
-      "session_id",
-      JSON.stringify(runtime.sessionIDs),
-    );
+    setRouterState("session_id", JSON.stringify(runtime.sessionIDs));
   },
   findChannel: (jid: string) => {
     for (const ch of runtime.channels) {

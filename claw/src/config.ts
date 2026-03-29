@@ -13,7 +13,8 @@ export const GROUPS_DIR = path.resolve(
 export const PI_DIR = path.resolve(PROJECT_ROOT, "..", "mount", "pi");
 
 // Container configure
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "vt-claw-agent:latest";
+export const CONTAINER_IMAGE =
+  process.env.CONTAINER_IMAGE || "vt-claw-agent:latest";
 export const CONTAINER_NAME_PREFIX = "vt-claw";
 export const MAX_CONCURRENT_CONTAINERS = 2;
 export const CONTAINER_TIMEOUT = parseInt(

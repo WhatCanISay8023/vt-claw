@@ -1,93 +1,107 @@
-import crypto from "node:crypto";
+import fs from "node:fs";
 import { logger } from "../logger.js";
-import { NewMessage, Channel, ChannelOpts } from "../types.js";
-import {
-  WeChatAuthInfo,
-  wechat_login,
-  apiGet,
-  apiPost,
-  WECHAT_BASE_URL,
-} from "./login.js";
-
-interface WxMessage {
-  msgId: string;
-  chatId: string;
-  senderId: string;
-  senderName?: string;
-  content: string;
-  timestamp: string;
-  isGroup?: boolean;
-}
-
-/** X-WECHAT-UIN: 随机 uint32 → 十进制字符串 → base64 */
-function randomWechatUin() {
-  const uint32 = crypto.randomBytes(4).readUInt32BE(0);
-  return Buffer.from(String(uint32), "utf-8").toString("base64");
-}
-
-/** 从消息 item_list 提取纯文本 */
-function extractText(msg: any) {
-  for (const item of msg.item_list ?? []) {
-    if (item.type === 1 && item.text_item?.text) return item.text_item.text;
-    if (item.type === 3 && item.voice_item?.text)
-      return `[语音] ${item.voice_item.text}`;
-    if (item.type === 2) return "[图片]";
-    if (item.type === 4) return `[文件] ${item.file_item?.file_name ?? ""}`;
-    if (item.type === 5) return "[视频]";
-  }
-  return "[空消息]";
-}
-
-/** 发送文本消息 */
-async function sendMessage(
-  baseUrl: string,
-  token: string,
-  toUserId: string,
-  text: string,
-  contextToken: any,
-) {
-  const clientId = `demo-${crypto.randomUUID()}`;
-  await apiPost(
-    baseUrl,
-    "ilink/bot/sendmessage",
-    {
-      msg: {
-        from_user_id: "",
-        to_user_id: toUserId,
-        client_id: clientId,
-        message_type: 2, // BOT
-        message_state: 2, // FINISH
-        context_token: contextToken,
-        item_list: [
-          { type: 1, text_item: { text } }, // TEXT
-        ],
-      },
-    },
-    token,
-  );
-  return clientId;
-}
+import { ChannelOpts, Channel, NewMessage } from "../types.js";
+import { wechat_login, WeChatAuthInfo, WECHAT_AUTH_FILE } from "./login.js";
+// https://github.com/abczsl520/weixin-bot-sdk
+import { WeixinBot, ParsedMessage } from "weixin-bot-sdk";
 
 export class WeChatChannel implements Channel {
   name = "";
   jid = "";
   folder = "";
+  private opts: ChannelOpts;
+  private bot: WeixinBot;
   private connected = false;
   private auth: WeChatAuthInfo;
-  private opts: ChannelOpts;
-  private typing_ticket: string = "";
-  private lastContentToken: string = "";
+  // Track current conversation context for replies
+  private currentContextToken: string | null = null;
+  private currentFromUser: string | null = null;
 
   private constructor(auth: WeChatAuthInfo, opts: ChannelOpts) {
-    this.auth = {
-      WX_TOKEN: auth.WX_TOKEN,
-      WX_ACCOUNT_ID: auth.WX_ACCOUNT_ID,
-      WX_USER_ID: auth.WX_USER_ID,
-    };
-    this.name = `WeChat-${auth.WX_USER_ID}`.slice(0, 15);
-    this.jid = `wx-${auth.WX_USER_ID}`;
-    this.folder = "wx-" + auth.WX_ACCOUNT_ID.split("@")[0];
+    this.name = `WeChat-${auth.userId}`.slice(0, 15);
+    this.jid = `wx-${auth.userId}`;
+    this.folder = "wx-" + auth.botId.split("@")[0];
     this.opts = opts;
+    this.auth = auth;
+
+    this.bot = new WeixinBot({
+      credentialsPath: WECHAT_AUTH_FILE,
+    });
+
+    // Set up event handlers
+    this.setupEventHandlers();
+  }
+
+  private setupEventHandlers(): void {
+    // Handle incoming messages
+    this.bot.on("message", (msg: ParsedMessage) => {
+      this.handleIncomingMessage(msg);
+    });
+
+    // Handle errors
+    this.bot.on("error", (err: Error) => {
+      logger.error(`[WeChat] Error: ${err.message}`);
+    });
+
+    // Handle session expiration
+    this.bot.on("session:expired", () => {
+      logger.warn(`[WeChat] Session expired`);
+      this.connected = false;
+    });
+  }
+
+  private handleIncomingMessage(msg: ParsedMessage): void {
+    // console.log(JSON.stringify(msg, null, 2));
+    // Store context for replies
+    this.currentFromUser = msg.from;
+    if ((msg as any).context_token) {
+      this.currentContextToken = (msg as any).context_token;
+    }
+
+    // Determine message type and content
+    let type: "text" | "image" | "file" = "text";
+    let content = "";
+
+    switch (msg.type) {
+      case "text":
+        type = "text";
+        content = msg.text || "";
+        break;
+      case "image":
+        type = "image";
+        content = msg.image?.url || "";
+        break;
+      case "file":
+        type = "file";
+        content = msg.file?.file_name || "";
+        break;
+      /*
+      case 'video':
+        type = "file";
+        content = msg.video?.url || "";
+        break;
+      */
+      case "voice":
+        type = "text";
+        content = msg.text || "[语音消息]";
+        break;
+      default:
+        type = "text";
+        content = msg.text || `[${msg.type}消息]`;
+    }
+
+    // Create the message object
+    const newMessage: NewMessage = {
+      id: "" + msg.messageId,
+      jid: this.jid,
+      role: "bot",
+      type,
+      content,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Deliver to the callback
+    this.opts.onMessage(this.jid, newMessage);
   }
 
   static async create(opts: ChannelOpts): Promise<WeChatChannel> {
@@ -97,20 +111,27 @@ export class WeChatChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    try {
-      this.connected = true;
-      void this.pollMessagesLoop();
+    if (this.connected) return;
 
-      logger.info("WeChat channel connected");
+    try {
+      // Start polling for messages
+      this.bot.start();
+      this.connected = true;
+      logger.info(`[WeChat] Channel connected: ${this.name}`);
     } catch (err) {
-      logger.error({ err }, "Failed to connect WeChat channel");
+      logger.error(`[WeChat] Connect failed: ${(err as Error).message}`);
       throw err;
     }
   }
+
   async disconnect(): Promise<void> {
+    if (!this.connected) return;
+
+    this.bot.stop();
     this.connected = false;
-    logger.info("WeChat channel disconnected");
+    logger.info(`[WeChat] Channel disconnected: ${this.name}`);
   }
+
   isConnected(): boolean {
     return this.connected;
   }
@@ -119,109 +140,49 @@ export class WeChatChannel implements Channel {
     type: "text" | "image" | "file",
     content: string,
   ): Promise<void> {
-    if (!this.connected || !this.auth.WX_TOKEN) {
-      logger.warn("WeChat channel not connected, cannot send message");
-      return;
+    if (!this.connected || !this.currentFromUser) {
+      throw new Error("Not connected or no active conversation");
     }
-    const userId = this.auth.WX_USER_ID;
-    await sendMessage(
-      WECHAT_BASE_URL,
-      this.auth.WX_TOKEN,
-      userId,
-      content,
-      this.lastContentToken,
-    );
-    logger.debug({ userId }, "WeChat message sent");
+
+    try {
+      switch (type) {
+        case "text": {
+          await this.bot.sendText(
+            this.currentFromUser,
+            content,
+            this.currentContextToken || undefined,
+          );
+          break;
+        }
+        case "image": {
+          // content should be a file path or URL, read and send
+          const buffer = fs.readFileSync(content);
+          await this.bot.sendImage(this.currentFromUser, buffer);
+          break;
+        }
+        case "file": {
+          // content should be a file path
+          const buffer = fs.readFileSync(content);
+          const filename = content.split("/").pop() || "file";
+          await this.bot.sendFile(this.currentFromUser, buffer, filename);
+          break;
+        }
+      }
+    } catch (err) {
+      logger.error(`[WeChat] Send message failed: ${(err as Error).message}`);
+      throw err;
+    }
   }
 
   async setTyping(isTyping: boolean): Promise<void> {
-    /*
-    if (this.typing_ticket === "") {
-      const resp = await apiPost(
-        WECHAT_BASE_URL,
-        "/ilink/bot/getconfig",
-        {},
-        this.auth.WX_TOKEN,
-        38_000, // 长轮询，服务器最多 hold 35s
-      );
-      console.log(">>>>>>>>>: " + resp);
-    }
-    */
-  }
+    if (!this.connected || !this.currentFromUser) return;
 
-  // internal functions
-
-  /** 长轮询获取新消息，返回 { msgs, get_updates_buf } */
-  private async getUpdates(getUpdatesBuf: any) {
-    const resp = await apiPost(
-      WECHAT_BASE_URL,
-      "ilink/bot/getupdates",
-      { get_updates_buf: getUpdatesBuf ?? "" },
-      this.auth.WX_TOKEN,
-      38_000, // 长轮询，服务器最多 hold 35s
-    );
-    return resp ?? { ret: 0, msgs: [], get_updates_buf: getUpdatesBuf };
-  }
-
-  /**
-   * 处理接收到的消息
-   */
-  private async handleMessage(userId: string, text: string): Promise<void> {
-    try {
-      const timestamp = new Date().toISOString();
-      const newMsg: NewMessage = {
-        id: crypto.randomUUID(),
-        jid: this.jid,
-        role: "me",
-        type: "text",
-        content: text,
-        timestamp: timestamp,
-      };
-
-      this.opts.onMessage(this.jid, newMsg);
-      logger.info({ userId }, "WeChat message received");
-    } catch (err) {
-      logger.error({ userId }, "Error handling WeChat message");
-    }
-  }
-
-  private async pollMessagesLoop(): Promise<void> {
-    if (!this.connected || !this.auth.WX_TOKEN) return;
-    logger.info("🚀 开始微信长轮询收消息...\n");
-
-    let getUpdatesBuf: any = "";
-    while (this.connected) {
+    if (isTyping) {
       try {
-        const resp = await this.getUpdates(getUpdatesBuf);
-        // 更新 buf（服务器下发的游标，下次请求带上）
-        if (resp.get_updates_buf) {
-          getUpdatesBuf = resp.get_updates_buf;
-        }
-
-        for (const msg of resp.msgs ?? []) {
-          // 只处理用户发来的消息（message_type=1）
-          if (msg.message_type !== 1) continue;
-
-          const from = msg.from_user_id;
-          const text = extractText(msg);
-          this.lastContentToken = msg.context_token;
-
-          logger.info(`📩 [${new Date().toLocaleTimeString()}] 收到消息`);
-          logger.info(`   From: ${from}`);
-          logger.info(`   Text: ${text}`);
-
-          await this.handleMessage(from, text);
-        }
-      } catch (err: any) {
-        if (
-          err.message?.includes("session timeout") ||
-          err.message?.includes("-14")
-        ) {
-          console.error("❌ Session 已过期，请重新登录: node demo.mjs --login");
-          process.exit(1);
-        }
-        console.error(`⚠️  轮询出错: ${err.message}，3 秒后重试...`);
-        await new Promise((r) => setTimeout(r, 3000));
+        await this.bot.sendTyping(this.currentFromUser);
+      } catch (err) {
+        // Typing indicator is optional, don't throw
+        logger.debug(`[WeChat] sendTyping failed: ${(err as Error).message}`);
       }
     }
   }

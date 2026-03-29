@@ -441,10 +441,12 @@ export async function buildGroups(runtime: ChannelRuntime): Promise<void> {
         for (const key of Object.keys(record)) {
           if (key === "apiKey" && typeof record[key] === "string") {
             const ename = record[key];
-            const evalue =  readEnvFile([ename])[ename];
+            const evalue = readEnvFile([ename])[ename];
             if (!evalue) {
-              throw new Error(`Replacing ${modelFile} : can't find ${ename} in .env`)
-            } 
+              throw new Error(
+                `Replacing ${modelFile} : can't find ${ename} in .env`,
+              );
+            }
             obj[key] = evalue;
           } else {
             collectApiKeys(record[key]);
