@@ -48,6 +48,8 @@ vt-claw 是一款以硬件技能（Skills）为核心，面向行业用户的 Cl
 claude "@AGENTS.md 请说明一下该软件如何进行安装和配置"
 ```
 
+<img src="assets/images/code.png" alt="案例3" width="100%"/>
+
 文档：
 - [安装设置](assets/docs/setup.md)
 
