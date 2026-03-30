@@ -89,13 +89,35 @@ async function test() {
         const fromID:string = msg.from_user_id || "";
         const token = msg.context_token;
         if ( extractText(msg)) {
-            bot.messaging.sender.sendMedia({
+          bot.sendText(
+            fromID,
+            "收到！",
+            token,
+          );
+          return;
+        }
+
+        if ( hasImage(msg) ) {
+          void (async () => {
+            const downloaded = await bot.media.downloader.downloadFirstMedia(msg);
+            if (!downloaded || downloaded.type !== 'image') {
+              return;
+            }
+            try{
+              await bot.messaging.sender.sendMedia({
                 to: fromID,
-                filePath: "/home/teaonly/workspace/xiaoer.png",
+                filePath: downloaded.path,
                 mediaType: UploadMediaType.IMAGE,
                 contextToken: token,
+              });
+            } finally {
+              await downloaded.cleanup();
+            }
+          })().catch((error) => {
+            console.error('[Echo] Failed to reply image:', error);
           });
         }
+
     });
 
     bot.on("error", (error) => {

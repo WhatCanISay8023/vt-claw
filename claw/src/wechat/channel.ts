@@ -14,12 +14,14 @@ import {
 import { WeixinBot } from "./sdk/index.js";
 import type { ParsedMessage } from "./sdk/types.js";
 */
+// https://github.com/NebulaMao/wechat-iLink-sdk-typescript
 import {
   WeixinSDK,
   TokenAuthProvider,
   UploadMediaType,
   WeixinMessage,
   MessageItemType,
+  DownloadedMedia
 } from "@xmccln/wechat-ilink-sdk";
 
 function extractText(message: WeixinMessage): string {
@@ -91,13 +93,14 @@ export class WeChatChannel implements Channel {
   // Track current conversation context for replies
   private currentContextToken: string | undefined = undefined;
   private currentFromUser: string | undefined = undefined;
+  private download : DownloadedMedia[] = [];
 
   private constructor(auth: WeChatAuthInfo, opts: ChannelOpts) {
     this.name = `WeChat-${auth.userId}`.slice(0, 15);
     this.jid = `wx-${auth.userId}`;
     this.folder = "wx-" + auth.userId.split("@")[0];
     this.opts = opts;
-    this.auth = auth;
+    this.auth = auth;    
 
     this.bot = new WeixinSDK({
       config: {
@@ -105,7 +108,7 @@ export class WeChatChannel implements Channel {
         cdnBaseUrl: WECHAT_CDN_URL,
         timeout: 35000,
       },
-      auth: new TokenAuthProvider(auth.botToken, auth.userId),
+      auth: new TokenAuthProvider(this.auth.botToken, this.auth.userId),
     });
 
     // Set up event handlers
@@ -123,7 +126,7 @@ export class WeChatChannel implements Channel {
     });
   }
 
-  private handleIncomingMessage(msg: WeixinMessage): void {
+  private async handleIncomingMessage(msg: WeixinMessage): void {
     if (msg.from_user_id) {
       this.currentFromUser = msg.from_user_id;
     }
@@ -147,9 +150,27 @@ export class WeChatChannel implements Channel {
         content: text,
         timestamp: new Date().toISOString(),
       };
-
       // Deliver to the callback
       this.opts.onMessage(this.jid, newMessage);
+      return;
+    } 
+
+    if ( hasInboundVoice || hasInboundVideo) {
+      await this.sendMessage("text", "我暂时无法处理这种格式！");
+    }
+    if (hasInboundImage) {
+      const downfile = await this.bot.media.downloader.downloadImage(msg);
+      if (downfile) {
+        this.download.push(downfile);
+        await this.sendMessage("text", "已收到您的图像文件！");
+      }
+    }
+    if (hasInboundFile) {
+      const downfile = await this.bot.media.downloader.downloadFile(msg);
+      if (downfile) {
+        this.download.push(downfile);
+        await this.sendMessage("text", "已收到您发送的文件！");
+      }
     }
   }
 
