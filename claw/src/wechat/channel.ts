@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import path from "node:path";
 import crypto from "node:crypto";
+import { fileTypeFromFile } from "file-type";
 import { logger } from "../logger.js";
 import { ChannelOpts, Channel, NewMessage } from "../types.js";
 import {
@@ -14,13 +16,16 @@ import {
 import { WeixinBot } from "./sdk/index.js";
 import type { ParsedMessage } from "./sdk/types.js";
 */
+// https://github.com/NebulaMao/wechat-iLink-sdk-typescript
 import {
   WeixinSDK,
   TokenAuthProvider,
   UploadMediaType,
   WeixinMessage,
   MessageItemType,
+  DownloadedMedia,
 } from "@xmccln/wechat-ilink-sdk";
+import { ref } from "node:process";
 
 function extractText(message: WeixinMessage): string {
   for (const item of message.item_list ?? []) {
@@ -91,6 +96,10 @@ export class WeChatChannel implements Channel {
   // Track current conversation context for replies
   private currentContextToken: string | undefined = undefined;
   private currentFromUser: string | undefined = undefined;
+  // Track downloading resources
+  private downloadingCount = 0;
+  private downloadFiles: DownloadedMedia[] = [];
+  private penddings: NewMessage[] = [];
 
   private constructor(auth: WeChatAuthInfo, opts: ChannelOpts) {
     this.name = `WeChat-${auth.userId}`.slice(0, 15);
@@ -105,7 +114,7 @@ export class WeChatChannel implements Channel {
         cdnBaseUrl: WECHAT_CDN_URL,
         timeout: 35000,
       },
-      auth: new TokenAuthProvider(auth.botToken, auth.userId),
+      auth: new TokenAuthProvider(this.auth.botToken, this.auth.userId),
     });
 
     // Set up event handlers
@@ -147,10 +156,93 @@ export class WeChatChannel implements Channel {
         content: text,
         timestamp: new Date().toISOString(),
       };
-
       // Deliver to the callback
-      this.opts.onMessage(this.jid, newMessage);
+      if (this.downloadingCount == 0) {
+        this.opts.onMessage(this.jid, newMessage);
+      } else {
+        this.penddings.push(newMessage);
+      }
+      return;
     }
+    if (hasInboundVoice || hasInboundVideo) {
+      this.sendMessage("text", "我暂时无法处理这种格式！");
+    }
+    if (hasInboundImage) {
+      this.downloadingCount++;
+      this.bot.media.downloader
+        .downloadImage(msg)
+        .then((result) => this.handleDownloadedFile(result))
+        .finally(() => {
+          this.downloadingCount--;
+          this.flushPenddings().catch((err) =>
+            logger.debug(
+              `[WeChat] flushPenddings error: ${(err as Error).message}`,
+            ),
+          );
+        });
+    }
+    if (hasInboundFile) {
+      this.downloadingCount++;
+      this.bot.media.downloader
+        .downloadFile(msg)
+        .then((result) => this.handleDownloadedFile(result))
+        .finally(() => {
+          this.downloadingCount--;
+          this.flushPenddings().catch((err) =>
+            logger.debug(
+              `[WeChat] flushPenddings error: ${(err as Error).message}`,
+            ),
+          );
+        });
+    }
+  }
+
+  private handleDownloadedFile(result: DownloadedMedia | null): void {
+    if (result) {
+      this.downloadFiles.push(result);
+    }
+  }
+
+  private async flushPenddings(): Promise<void> {
+    if (this.downloadingCount > 0) return;
+
+    for (const download of this.downloadFiles) {
+      try {
+        const fileType = download.type == "image" ? "image" : "file";
+        const detected = await fileTypeFromFile(download.path);
+        if (detected) {
+          const ext = detected.ext;
+          const dir = path.dirname(download.path);
+          const baseName = path.basename(
+            download.path,
+            path.extname(download.path),
+          );
+          const newPath = path.join(dir, `${baseName}.${ext}`);
+          if (download.path !== newPath) {
+            fs.renameSync(download.path, newPath);
+          }
+          const newMessage: NewMessage = {
+            id: crypto.randomUUID(),
+            jid: this.jid,
+            role: "bot",
+            type: fileType,
+            content: newPath,
+            timestamp: new Date().toISOString(),
+          };
+          this.opts.onMessage(this.jid, newMessage);
+        }
+      } catch (err) {
+        logger.debug(
+          `[WeChat] Failed to detect/rename file: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Deliver all pending messages
+    for (const msg of this.penddings) {
+      this.opts.onMessage(this.jid, msg);
+    }
+    this.penddings = [];
   }
 
   static async create(opts: ChannelOpts): Promise<WeChatChannel> {
@@ -211,6 +303,7 @@ export class WeChatChannel implements Channel {
             mediaType: UploadMediaType.IMAGE,
             contextToken: this.currentContextToken,
           });
+          break;
         }
         case "file": {
           // content should be a file path or URL, read and send
@@ -220,6 +313,7 @@ export class WeChatChannel implements Channel {
             mediaType: UploadMediaType.FILE,
             contextToken: this.currentContextToken,
           });
+          break;
         }
       }
     } catch (err) {

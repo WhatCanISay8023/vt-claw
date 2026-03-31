@@ -34,6 +34,9 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+`/workspace/group/received` will received some attached files from the user. Only read TXT file's content, don't read binary file's content.
+
+
 ## Memory
 
 When you learn something important:

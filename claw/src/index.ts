@@ -14,7 +14,12 @@ import {
   getAllTasks,
 } from "./db.js";
 import { startMessageLoop, formatMessages, formatOutbound } from "./message.js";
-import { GroupQueue, buildGroups, writeTasksSnapshot } from "./group.js";
+import {
+  GroupQueue,
+  buildGroups,
+  receiveFileForGroup,
+  writeTasksSnapshot,
+} from "./group.js";
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -78,8 +83,14 @@ const runtime: ChannelRuntime = {
 // Message entry and loop
 const channelOpts: ChannelOpts = {
   onMessage: (jid: string, message: NewMessage) => {
-    if (runtime.findChannel(jid)) {
-      storeMessage(message);
+    const channel = runtime.findChannel(jid);
+    if (channel) {
+      if (message.type === "text") {
+        storeMessage(message);
+      } else {
+        message.content = receiveFileForGroup(channel.folder, message.content);
+        storeMessage(message);
+      }
     }
   },
 };
