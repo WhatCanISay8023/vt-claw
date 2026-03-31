@@ -7,7 +7,7 @@ import {
   PI_DIR,
   MAX_CONCURRENT_CONTAINERS,
 } from "./config.js";
-import { ChannelRuntime } from "./types.js";
+import { ChannelRuntime, Channel } from "./types.js";
 import { readEnvFile } from "./env.js";
 import { logger } from "./logger.js";
 
@@ -489,7 +489,22 @@ export async function buildGroups(runtime: ChannelRuntime): Promise<void> {
     fs.mkdirSync(logsDir, { recursive: true });
   }
 }
+export function receiveFileForGroup(folder: string, filePath: string): string {
+  const groupDir = resolveGroupFolderPath(folder);
+  const recvFileDir = path.join(groupDir, "received");
 
+  // Ensure target directory exists
+  fs.mkdirSync(recvFileDir, { recursive: true });
+
+  const originalName = path.basename(filePath);
+  const targetPath = path.join(recvFileDir, originalName);
+
+  // Move file to received directory
+  fs.renameSync(filePath, targetPath);
+
+  // Return container path
+  return `/workspace/group/received/${originalName}`;
+}
 export function writeTasksSnapshot(
   groupFolder: string,
   tasks: Array<{

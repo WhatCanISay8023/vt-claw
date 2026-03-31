@@ -84,7 +84,7 @@ async function test() {
     },
     auth: new TokenAuthProvider(auth.botToken, auth.userId),
   });
-  
+
   bot.onMessage((msg: WeixinMessage) => {
     const fromID: string = msg.from_user_id || "";
     const token = msg.context_token;

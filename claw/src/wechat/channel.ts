@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import path from "node:path";
 import crypto from "node:crypto";
+import { fileTypeFromFile } from "file-type";
 import { logger } from "../logger.js";
 import { ChannelOpts, Channel, NewMessage } from "../types.js";
 import {
@@ -23,6 +25,7 @@ import {
   MessageItemType,
   DownloadedMedia,
 } from "@xmccln/wechat-ilink-sdk";
+import { ref } from "node:process";
 
 function extractText(message: WeixinMessage): string {
   for (const item of message.item_list ?? []) {
@@ -171,7 +174,11 @@ export class WeChatChannel implements Channel {
         .then((result) => this.handleDownloadedFile(result))
         .finally(() => {
           this.downloadingCount--;
-          this.flushPenddings();
+          this.flushPenddings().catch((err) =>
+            logger.debug(
+              `[WeChat] flushPenddings error: ${(err as Error).message}`,
+            ),
+          );
         });
     }
     if (hasInboundFile) {
@@ -181,7 +188,11 @@ export class WeChatChannel implements Channel {
         .then((result) => this.handleDownloadedFile(result))
         .finally(() => {
           this.downloadingCount--;
-          this.flushPenddings();
+          this.flushPenddings().catch((err) =>
+            logger.debug(
+              `[WeChat] flushPenddings error: ${(err as Error).message}`,
+            ),
+          );
         });
     }
   }
@@ -192,14 +203,40 @@ export class WeChatChannel implements Channel {
     }
   }
 
-  private flushPenddings() {
+  private async flushPenddings(): Promise<void> {
     if (this.downloadingCount > 0) return;
 
     for (const download of this.downloadFiles) {
-      logger.info(`>>>>> ${download.path}`);
-      download.cleanup();
+      try {
+        const fileType = download.type == "image" ? "image" : "file";
+        const detected = await fileTypeFromFile(download.path);
+        if (detected) {
+          const ext = detected.ext;
+          const dir = path.dirname(download.path);
+          const baseName = path.basename(
+            download.path,
+            path.extname(download.path),
+          );
+          const newPath = path.join(dir, `${baseName}.${ext}`);
+          if (download.path !== newPath) {
+            fs.renameSync(download.path, newPath);
+          }
+          const newMessage: NewMessage = {
+            id: crypto.randomUUID(),
+            jid: this.jid,
+            role: "bot",
+            type: fileType,
+            content: newPath,
+            timestamp: new Date().toISOString(),
+          };
+          this.opts.onMessage(this.jid, newMessage);
+        }
+      } catch (err) {
+        logger.debug(
+          `[WeChat] Failed to detect/rename file: ${(err as Error).message}`,
+        );
+      }
     }
-    this.downloadFiles = [];
 
     // Deliver all pending messages
     for (const msg of this.penddings) {

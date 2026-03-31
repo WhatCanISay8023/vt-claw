@@ -113,7 +113,7 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    return `<message time="${escapeXml(displayTime)}" type='${m.type}'>${escapeXml(m.content)}</message>`;
   });
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
   return `${header}<messages>\n${lines.join("\n")}\n</messages>`;
