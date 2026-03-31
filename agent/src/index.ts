@@ -167,24 +167,31 @@ Guidelines:
 - When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did
 - Be concise in your responses
 - Show file paths clearly when working with files
+
+## Before Writing Code
+  Read all relevant files first. Never edit blind.
+  Understand the full requirement before writing anything.
+## While Writing Code
+  Test after writing. Never leave code untested.
+  Fix errors before moving on. Never skip failures.
+  Prefer editing over rewriting whole files.
+  Simplest working solution. No over-engineering.
+## Before Declaring Done
+  Run the code one final time to confirm it works.
+  Never declare done without a passing test.
+
 `;
 
 /**
- * Run a single query and stream results via writeOutput.
- *
- * Session persistence strategy:
- *   - If sessionId is provided, try to open existing session
- *   - If not found or no sessionId, create new persistent session
- *   - Sessions are stored in groupFolder/sessions/
+ * Create a session that can be reused across multiple queries.
  */
-async function runQuery(
-  prompt: string,
+async function createSession(
   containerInput: ContainerInput,
-): Promise<{ newSessionId?: string; closedDuringQuery: boolean }> {
+): Promise<{ session: Awaited<ReturnType<typeof createAgentSession>>["session"]; sessionManager: SessionManager }> {
   const sessionId = containerInput.sessionId;
-  let sessionManager;
+  let sessionManager: SessionManager;
+
   if (sessionId) {
-    // Try to find and open existing session
     try {
       const sessions = await SessionManager.list(process.cwd());
       const existingSession = sessions.find(
@@ -207,7 +214,6 @@ async function runQuery(
       sessionManager = SessionManager.create(process.cwd());
     }
   } else {
-    // No sessionId provided, create new persistent session
     log("Creating new persistent session");
     sessionManager = SessionManager.create(process.cwd());
   }
@@ -248,6 +254,16 @@ async function runQuery(
     }
   });
 
+  return { session, sessionManager };
+}
+
+/**
+ * Run a single query on an existing session and stream results via writeOutput.
+ */
+async function runQuery(
+  prompt: string,
+  session: Awaited<ReturnType<typeof createAgentSession>>["session"],
+): Promise<{ newSessionId: string }> {
   await session.prompt(prompt);
   const newSessionId = session.sessionId;
   const last = session.state.messages.length - 1;
@@ -274,7 +290,6 @@ async function runQuery(
 
   return {
     newSessionId: session.sessionId,
-    closedDuringQuery: false,
   };
 }
 
@@ -320,23 +335,17 @@ async function main(): Promise<void> {
     prompt += "\n" + pending.join("\n");
   }
 
+  // Create session once and reuse for all queries
+  const { session } = await createSession(containerInput);
+  containerInput.sessionId = session.sessionId;
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   try {
     while (true) {
       log(`Starting query (session: ${containerInput.sessionId || "new"})...`);
 
-      const queryResult = await runQuery(prompt, containerInput);
-      if (queryResult.newSessionId) {
-        containerInput.sessionId = queryResult.newSessionId;
-      }
-
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
-        log("Close sentinel consumed during query, exiting");
-        break;
-      }
+      const queryResult = await runQuery(prompt, session);
+      containerInput.sessionId = queryResult.newSessionId;
 
       // Emit session update so host can track it
       writeOutput({
