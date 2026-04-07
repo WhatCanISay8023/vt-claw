@@ -41,6 +41,7 @@ vt-claw 是一款以硬件技能（Skills）为核心，面向行业用户的 Cl
 参考行业分支：
  - [线下店铺分支](https://github.com/viitrix/vt-claw/tree/xiaoer) 支持查看安防监控，维护店铺网页等；
  - [我的大学分支](https://github.com/viitrix/vt-claw/tree/mycollege) 支持对接行业单位的邮件、消息、OA系统，采用 OpenCLI 扩展支持；
+ - [Polymarket市场分析](https://github.com/viitrix/vt-claw/tree/polymarket) 通过容器里增加相关资源和技能，7x24支持市场分析
 
 ## 关于代码
 
