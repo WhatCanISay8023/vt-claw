@@ -56,6 +56,40 @@ const QUERY_TIMEOUT_MS = parseInt(
   10,
 );
 
+function findSessionFileById(
+  searchRoot: string,
+  sessionId: string,
+): string | null {
+  if (!searchRoot || !fs.existsSync(searchRoot)) return null;
+
+  const stack = [searchRoot];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.includes(sessionId)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -216,9 +250,16 @@ async function createSession(
         (s) => s.id === sessionId || s.path.includes(sessionId),
       );
 
-      if (existingSession) {
-        log(`Resuming existing session: ${existingSession.id.slice(0, 8)}...`);
-        sessionManager = SessionManager.open(existingSession.path);
+      const persistedSessionPath =
+        existingSession?.path ||
+        findSessionFileById(
+          path.join(process.env.HOME || "", ".pi", "agent", "sessions"),
+          sessionId,
+        );
+
+      if (persistedSessionPath) {
+        log(`Resuming existing session: ${sessionId.slice(0, 8)}...`);
+        sessionManager = SessionManager.open(persistedSessionPath);
       } else {
         log(
           `Session ${sessionId.slice(0, 8)}... not found, creating new session`,
